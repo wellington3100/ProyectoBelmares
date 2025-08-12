@@ -1,0 +1,363 @@
+
+# =============================================================================
+# Sistema de Gestión de Usuarios
+# =============================================================================
+
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import mysql.connector
+from datetime import datetime
+from typing import Optional, List, Tuple
+
+
+class Usuario:
+    """
+    Atributos: id, nombre, email, fecha_registro
+    """
+    def __init__(self, nombre: str, email: str, id_usuario: Optional[int] = None, 
+                 fecha_registro: Optional[datetime] = None):
+        self.id = id_usuario
+        self.nombre = nombre
+        self.email = email
+        self.fecha_registro = fecha_registro or datetime.now()
+    
+    def __str__(self):
+        return f"Usuario({self.id}, {self.nombre}, {self.email})"
+
+class BaseDatos:
+    """
+    Clase para manejar la conexión y operaciones con MariaDB
+    """
+    def __init__(self):
+        self.host = "localhost"
+        self.usuario = "root"
+        self.password = ""
+        self.base_datos = "app_usuarios"
+        self.conexion = None
+    
+    def conectar(self) -> bool:
+        try:
+            self.conexion = mysql.connector.connect(
+                host=self.host,
+                user=self.usuario,
+                password=self.password,
+                database=self.base_datos
+            )
+            return True
+        except mysql.connector.Error as error:
+            messagebox.showerror("Error de Conexión", f"No se pudo conectar a la BD: {error}")
+            return False
+    
+    def desconectar(self):
+        """Cierra la conexión con la base de datos"""
+        if self.conexion and self.conexion.is_connected():
+            self.conexion.close()
+    
+    def insertar_usuario(self, usuario: Usuario) -> bool:
+        """Inserta un nuevo usuario en la base de datos"""
+        try:
+            cursor = self.conexion.cursor()
+            query = "INSERT INTO usuarios (nombre, email, fecha_registro) VALUES (%s, %s, %s)"
+            valores = (usuario.nombre, usuario.email, usuario.fecha_registro)
+            cursor.execute(query, valores)
+            self.conexion.commit()
+            cursor.close()
+            return True
+        except mysql.connector.Error as error:
+            messagebox.showerror("Error", f"Error al insertar usuario: {error}")
+            return False
+    
+    def obtener_usuarios(self) -> List[Usuario]:
+        """Obtiene todos los usuarios de la base de datos"""
+        usuarios = []
+        try:
+            cursor = self.conexion.cursor()
+            cursor.execute("SELECT id, nombre, email, fecha_registro FROM usuarios")
+            resultados = cursor.fetchall()
+            
+            for fila in resultados:
+                usuario = Usuario(
+                    nombre=fila[1],
+                    email=fila[2],
+                    id_usuario=fila[0],
+                    fecha_registro=fila[3]
+                )
+                usuarios.append(usuario)
+            cursor.close()
+        except mysql.connector.Error as error:
+            messagebox.showerror("Error", f"Error al obtener usuarios: {error}")
+        
+        return usuarios
+    
+    def actualizar_usuario(self, usuario: Usuario) -> bool:
+        """Actualiza un usuario existente"""
+        try:
+            cursor = self.conexion.cursor()
+            query = "UPDATE usuarios SET nombre = %s, email = %s WHERE id = %s"
+            valores = (usuario.nombre, usuario.email, usuario.id)
+            cursor.execute(query, valores)
+            self.conexion.commit()
+            cursor.close()
+            return True
+        except mysql.connector.Error as error:
+            messagebox.showerror("Error", f"Error al actualizar usuario: {error}")
+            return False
+    
+    def eliminar_usuario(self, id_usuario: int) -> bool:
+        """Elimina un usuario por su ID"""
+        try:
+            cursor = self.conexion.cursor()
+            cursor.execute("DELETE FROM usuarios WHERE id = %s", (id_usuario,))
+            self.conexion.commit()
+            cursor.close()
+            return True
+        except mysql.connector.Error as error:
+            messagebox.showerror("Error", f"Error al eliminar usuario: {error}")
+            return False
+
+class ControladorUsuarios:
+    """
+    Controlador que maneja la lógica de negocio para los usuarios
+    """
+    def __init__(self):
+        self.bd = BaseDatos()
+        self.conectado = False
+    
+    def inicializar(self) -> bool:
+        """Inicializa la conexión a la base de datos"""
+        self.conectado = self.bd.conectar()
+        return self.conectado
+    
+    def crear_usuario(self, nombre: str, email: str) -> bool:
+        """Crea un nuevo usuario"""
+        if not nombre or not email:
+            messagebox.showwarning("Advertencia", "Nombre y email son obligatorios")
+            return False
+        
+        usuario = Usuario(nombre, email)
+        return self.bd.insertar_usuario(usuario)
+    
+    def listar_usuarios(self) -> List[Usuario]:
+        """Lista todos los usuarios"""
+        return self.bd.obtener_usuarios()
+    
+    def modificar_usuario(self, id_usuario: int, nombre: str, email: str) -> bool:
+        """Modifica un usuario existente"""
+        usuario = Usuario(nombre, email, id_usuario)
+        return self.bd.actualizar_usuario(usuario)
+    
+    def borrar_usuario(self, id_usuario: int) -> bool:
+        """Elimina un usuario"""
+        return self.bd.eliminar_usuario(id_usuario)
+    
+    def cerrar(self):
+        """Cierra la conexión"""
+        self.bd.desconectar()
+
+# =============================================================================
+# INTERFAZ GRÁFICA
+# =============================================================================
+
+class AplicacionPrincipal:
+    """
+    Clase principal de la interfaz gráfica de usuario
+    """
+    def __init__(self):
+        self.root = tk.Tk()
+        self.controlador = ControladorUsuarios()
+        self.configurar_ventana()
+        self.crear_widgets()
+        
+        # Intentar conectar a la base de datos
+        if not self.controlador.inicializar():
+            messagebox.showerror("Error", "No se pudo conectar a la base de datos")
+            self.root.destroy()
+            return
+        
+        self.actualizar_lista()
+    
+    def configurar_ventana(self):
+        """Configura la ventana principal"""
+        self.root.title("Gestión de Usuarios - CRUD App")
+        self.root.geometry("800x600")
+        self.root.resizable(True, True)
+        
+        # Configurar cierre de ventana
+        self.root.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
+    
+    def crear_widgets(self):
+        """Crea todos los widgets de la interfaz"""
+        # Frame principal
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Título
+        titulo = ttk.Label(main_frame, text="Sistema de Gestión de Usuarios", 
+                          font=("Arial", 16, "bold"))
+        titulo.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+        # Botones de acción
+        frame_botones = ttk.Frame(main_frame)
+        frame_botones.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        ttk.Button(frame_botones, text="Nuevo Usuario", 
+                  command=self.nuevo_usuario).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(frame_botones, text="Editar Usuario", 
+                  command=self.editar_usuario).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_botones, text="Eliminar Usuario", 
+                  command=self.eliminar_usuario).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_botones, text="Actualizar Lista", 
+                  command=self.actualizar_lista).pack(side=tk.LEFT, padx=5)
+        
+        # Tabla de usuarios
+        self.crear_tabla(main_frame)
+        
+        # Barra de estado
+        self.estado = ttk.Label(main_frame, text="Conectado a la base de datos", 
+                               relief=tk.SUNKEN)
+        self.estado.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        # Configurar redimensionamiento
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+    
+    def crear_tabla(self, parent):
+        """Crea la tabla para mostrar usuarios"""
+        # Frame para la tabla
+        frame_tabla = ttk.Frame(parent)
+        frame_tabla.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Treeview
+        columnas = ("ID", "Nombre", "Email", "Fecha Registro")
+        self.tabla = ttk.Treeview(frame_tabla, columns=columnas, show="headings", height=15)
+        
+        # Configurar columnas
+        self.tabla.heading("ID", text="ID")
+        self.tabla.heading("Nombre", text="Nombre")
+        self.tabla.heading("Email", text="Email")
+        self.tabla.heading("Fecha Registro", text="Fecha de Registro")
+        
+        self.tabla.column("ID", width=50, anchor=tk.CENTER)
+        self.tabla.column("Nombre", width=150)
+        self.tabla.column("Email", width=200)
+        self.tabla.column("Fecha Registro", width=150, anchor=tk.CENTER)
+        
+        # Scrollbars
+        scroll_v = ttk.Scrollbar(frame_tabla, orient=tk.VERTICAL, command=self.tabla.yview)
+        scroll_h = ttk.Scrollbar(frame_tabla, orient=tk.HORIZONTAL, command=self.tabla.xview)
+        self.tabla.configure(yscrollcommand=scroll_v.set, xscrollcommand=scroll_h.set)
+        
+        # Posicionar widgets
+        self.tabla.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        scroll_v.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        scroll_h.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        
+        # Configurar redimensionamiento
+        frame_tabla.columnconfigure(0, weight=1)
+        frame_tabla.rowconfigure(0, weight=1)
+    
+    def actualizar_lista(self):
+        """Actualiza la lista de usuarios en la tabla"""
+        # Limpiar tabla
+        for item in self.tabla.get_children():
+            self.tabla.delete(item)
+        
+        # Cargar usuarios
+        usuarios = self.controlador.listar_usuarios()
+        for usuario in usuarios:
+            fecha_str = usuario.fecha_registro.strftime("%d/%m/%Y %H:%M")
+            self.tabla.insert("", tk.END, values=(
+                usuario.id, usuario.nombre, usuario.email, fecha_str
+            ))
+        
+        self.estado.config(text=f"Total de usuarios: {len(usuarios)}")
+    
+    def nuevo_usuario(self):
+        """Abre diálogo para crear nuevo usuario"""
+        nombre = simpledialog.askstring("Nuevo Usuario", "Ingrese el nombre:")
+        if not nombre:
+            return
+        
+        email = simpledialog.askstring("Nuevo Usuario", "Ingrese el email:")
+        if not email:
+            return
+        
+        if self.controlador.crear_usuario(nombre, email):
+            messagebox.showinfo("Éxito", "Usuario creado correctamente")
+            self.actualizar_lista()
+        else:
+            messagebox.showerror("Error", "No se pudo crear el usuario")
+    
+    def editar_usuario(self):
+        """Edita el usuario seleccionado"""
+        seleccion = self.tabla.selection()
+        if not seleccion:
+            messagebox.showwarning("Advertencia", "Seleccione un usuario para editar")
+            return
+        
+        item = self.tabla.item(seleccion[0])
+        valores = item['values']
+        id_usuario, nombre_actual, email_actual = valores[0], valores[1], valores[2]
+        
+        # Solicitar nuevos datos
+        nuevo_nombre = simpledialog.askstring("Editar Usuario", "Nombre:", initialvalue=nombre_actual)
+        if nuevo_nombre is None:
+            return
+        
+        nuevo_email = simpledialog.askstring("Editar Usuario", "Email:", initialvalue=email_actual)
+        if nuevo_email is None:
+            return
+        
+        if self.controlador.modificar_usuario(id_usuario, nuevo_nombre, nuevo_email):
+            messagebox.showinfo("Éxito", "Usuario actualizado correctamente")
+            self.actualizar_lista()
+        else:
+            messagebox.showerror("Error", "No se pudo actualizar el usuario")
+    
+    def eliminar_usuario(self):
+        """Elimina el usuario seleccionado"""
+        seleccion = self.tabla.selection()
+        if not seleccion:
+            messagebox.showwarning("Advertencia", "Seleccione un usuario para eliminar")
+            return
+        
+        item = self.tabla.item(seleccion[0])
+        id_usuario = item['values'][0]
+        nombre = item['values'][1]
+        
+        # Confirmar eliminación
+        respuesta = messagebox.askyesno("Confirmar", 
+                                       f"¿Está seguro de eliminar al usuario '{nombre}'?")
+        if respuesta:
+            if self.controlador.borrar_usuario(id_usuario):
+                messagebox.showinfo("Éxito", "Usuario eliminado correctamente")
+                self.actualizar_lista()
+            else:
+                messagebox.showerror("Error", "No se pudo eliminar el usuario")
+    
+    def cerrar_aplicacion(self):
+        """Cierra la aplicación correctamente"""
+        self.controlador.cerrar()
+        self.root.quit()
+        self.root.destroy()
+    
+    def ejecutar(self):
+        """Inicia la aplicación"""
+        self.root.mainloop()
+
+# =============================================================================
+# PUNTO DE ENTRADA DE LA APLICACIÓN
+# =============================================================================
+
+def main():
+    """Función principal de la aplicación"""
+    try:
+        app = AplicacionPrincipal()
+        app.ejecutar()
+    except Exception as e:
+        messagebox.showerror("Error Fatal", f"Error inesperado: {e}")
+
+if __name__ == "__main__":
+    main()
